@@ -4,7 +4,7 @@
 <head>
 	<meta charset="UTF-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1.0">
-	<title>DT XTech WebRTC Player</title>
+	<title>DT XTech WebRTC Streamer</title>
 	<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css">
 	<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
 	<style>
@@ -219,8 +219,8 @@
 
 <body>
 	<div class="container text-center">
-		<h1>DT XTech WebRTC Player</h1>
-		<p class="lead">Initiate WebRTC call with a remote peer</p>
+		<h1>DT XTech WebRTC Streamer</h1>
+		<p class="lead">Answer WebRTC call and share video stream</p>
 		<div class="connection-info">
 			<table>
 				<tbody>
@@ -255,59 +255,46 @@
 					Upload ICE Configuration
 				</button>
 				<div class="space"></div>
+				<button id="accessMediaButton" class="btn1" style="width:100%">
+					Request Media Access
+				</button>
 			</div>
 		</div>
 		<div class="space"></div>
 
-		<div class="row justify-content-center">
-			<div class="col-md-8">
-				<div class="video-container">
-					<video id="localVideo" controls autoplay muted></video>
-				</div>
-			</div>
-		</div>
+		<table class="table-offer">
+			<tbody>
+				<tr>
+					<td><input id="remoteOffer" type="text"
+							placeholder="Paste SDP offer here or upload it by pressing upload button"
+							style="width:100%" /></td>
+				</tr>
+			</tbody>
+		</table>
 
 		<div class="row justify-content-center btn-container">
+			<div class="space"></div>
 			<div class="col-md-8">
-				<button disabled id="startCallButton" class="btn btn-primary btn-lg">
-					Start Call
-				</button>
-				<button disabled id="stopCallButton" class="btn btn-danger btn-lg">
-					Stop Call
-				</button>
+				<input type="button" value="Accept Offer and Generate Answer" style="width:100%; margin-top:20px"
+				onclick="createPeer(); createAnswer()" />
 			</div>
 		</div>
 
-		<div class="container">
-			<table class="table-offer">
-				<tr>
-					<td style="width: 30%; background-color: #17a2b8;">SDP Offer:</td>
-					<td><input id="createdOffer" type="text" style="width: 100%" readonly hidden /></td>
-				</tr>
-			</table>
+		<table class="table-offer">
+			<tbody>
+				<td><input id="createdAnswer" type="text" style="width:100%" /></td>
+			</tbody>
+		</table>
 
-			<table>
-				<tbody>
-					<tr>
-						<td>
-							<input id="remoteAnswer" type="text" class="form-control" style="width:100%"
-								placeholder="Paste SDP answer here or upload it by pressing upload button">
-							<div class="space"></div>
-							<input type="button" value="Accept Answer" style="width:100%" onclick="acceptAnswer()" />
-						</td>
-					</tr>
-				</tbody>
-			</table>
-			<div class="row justify-content-center btn-container">
-				<div class="space"></div>
-				<div class="col-md-8">
-					<button disabled id="downloadButton" class="btn1">
-						Download SDP Offer
-					</button>
-					<button disabled id="uploadButton" class="btn1">
-						Upload SDP Answer
-					</button>
-				</div>
+		<div class="row justify-content-center btn-container">
+			<div class="space"></div>
+			<div class="col-md-8">
+				<button disabled id="uploadButton" class="btn1">
+					Upload SDP Offer
+				</button>
+				<button disabled id="downloadButton" class="btn1">
+					Download SDP Answer
+				</button>
 			</div>
 		</div>
 
@@ -318,6 +305,25 @@
 		</table>
 		<hr />
 
+		<div class="row justify-content-center btn-container">
+			<div class="col-md-8">
+				<button disabled id="startCallButton" class="btn btn-primary btn-lg">
+					Show Video Stream
+				</button>
+				<button disabled id="stopCallButton" class="btn btn-danger btn-lg">
+					Hide Video Stream
+				</button>
+			</div>
+		</div>
+
+		<div class="row justify-content-center">
+			<div class="space"></div>
+			<div class="col-md-8">
+				<div class="video-container">
+					<video id="localVideo" controls autoplay muted></video>
+				</div>
+			</div>
+		</div>
 	</div>
 
 	<script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
@@ -326,9 +332,11 @@
 	<script>
 		var peer = null;
 		var candidates = [];
-		var offer = null;
+		var mediaStream = null;
+		var videoStreamTrack = null;
+		var audioStreamTrack = null;
 		let channel = null;
-		var jsonStringOffer = null;
+		var jsonStringAnswer = null;
 		var globalIceConfig = null;
 
 		const btnStart = document.getElementById('startCallButton')
@@ -336,20 +344,21 @@
 		const btnDownload = document.getElementById("downloadButton")
 		const btnUpload = document.getElementById("uploadButton")
 		const btnIceUpload = document.getElementById("uploadICEButton")
+		const btnMediaAccess = document.getElementById("accessMediaButton")
 		const localVideoTag = document.getElementById('localVideo')
 
+		btnStop.disabled = true;
 		localVideoTag.style.display = "none"
-		document.getElementById('remoteAnswer').value = "";
-		btnStart.disabled = false;
+		btnStart.disabled = true;
 		btnDownload.disabled = true;
 		btnUpload.disabled = false;
 
-		async function downloadOffer() {
+		async function downloadAnswer() {
 			var encryptionKey = prompt("Enter password to encrypt SDP:");
 
 			if (encryptionKey !== null) {
 				// Convert the JSON string data to bytes
-				var dataBytes = new TextEncoder().encode(jsonStringOffer);
+				var dataBytes = new TextEncoder().encode(jsonStringAnswer);
 				var salt = crypto.getRandomValues(new Uint8Array(16)); // Generate a random salt
 
 				try {
@@ -410,7 +419,7 @@
 					a.href = url;
 
 					// Set the download attribute with the desired filename
-					a.download = "initiator_sdp_offer.json.enc";
+					a.download = "peer_sdp_answer.json.enc";
 
 					// Append the anchor to the body and click it programmatically to trigger download
 					document.body.appendChild(a);
@@ -427,7 +436,7 @@
 			} else {
 				console.warn("Skipping encryption of SDP data...");
 				// Create a Blob containing the JSON string data
-				var blob = new Blob([jsonStringOffer], { type: "application/json" });
+				var blob = new Blob([jsonStringAnswer], { type: "application/json" });
 
 				// Create a temporary URL for the Blob
 				var url = URL.createObjectURL(blob);
@@ -437,7 +446,7 @@
 				a.href = url;
 
 				// Set the download attribute with the desired filename
-				a.download = "initiator_sdp_offer.json"; // Change the filename as desired
+				a.download = "peer_sdp_answer.json"; // Change the filename as desired
 
 				// Append the anchor to the body and click it programmatically to trigger download
 				document.body.appendChild(a);
@@ -451,7 +460,7 @@
 			}
 		}
 
-		function uploadAnswer() {
+		function uploadOffer() {
 			// Create an input element of type file
 			var input = document.createElement('input');
 			input.type = 'file';
@@ -504,7 +513,7 @@
 									//console.log('Decrypted content:', decryptedContent);
 									// Parse the decrypted JSON content into an object
 									var parsedContent = JSON.parse(decryptedContent);
-									document.getElementById('remoteAnswer').value = JSON.stringify(parsedContent);
+									document.getElementById('remoteOffer').value = JSON.stringify(parsedContent);
 								} else {
 									console.warn("Decryption canceled by user.");
 								}
@@ -515,7 +524,7 @@
 						console.warn("Selected SDP file is not encrypted (.enc).");
 						// Handle non-encrypted files
 						var parsedContent = JSON.parse(fileContent);
-						document.getElementById('remoteAnswer').value = JSON.stringify(parsedContent);
+						document.getElementById('remoteOffer').value = JSON.stringify(parsedContent);
 					}
 				});
 					// Read the contents of the selected file as text
@@ -641,7 +650,12 @@
 			input.click();
 		}
 
-		function createPeer() {
+		async function createPeer() {
+			console.log("Parsing offer...")
+			//socket.emit('broadcast', {channel: 'log', message: {msg: 'createPeer()'} })
+			const offerSDP = JSON.parse(document.getElementById('remoteOffer').value)
+			console.log("Offer:", offerSDP)
+
 			let config = {
 				iceServers: [
 					{ urls: "stun:stun.l.google.com:19302" }
@@ -666,24 +680,10 @@
 			peer.onconnectionstatechange = connectionStateChangeHandler;
 			peer.ondatachannel = dataChannelEvent;
 
-			channel = peer.createDataChannel('data');
-			channel.onmessage = (event) => alert(event.data)
+			peer.addTrack(videoStreamTrack, mediaStream);
+			peer.addTrack(audioStreamTrack, mediaStream);
+			await peer.setRemoteDescription(offerSDP)
 
-			peer.addEventListener('track', function (evt) {
-				if (evt.track.kind == 'video') {
-					console.log("Recieving media stream");
-
-					localVideoTag.srcObject = evt.streams[0];
-					localVideoTag.style.display = 'inline'
-				}
-			});
-
-			peer.addTransceiver('audio', {
-				direction: 'recvonly'
-			});
-			peer.addTransceiver('video', {
-				direction: 'recvonly'
-			});
 		}
 
 		async function iceGatheringStateChangeHandler() {
@@ -698,14 +698,14 @@
 					case "gathering":
 						break;
 					case "complete":
-						document.getElementById('createdOffer').value = JSON.stringify(peer.localDescription)
-						document.getElementById('createdOffer').removeAttribute('hidden');
-						jsonStringOffer = JSON.stringify(peer.localDescription)
-						// console.log("Offer:", peer.localDescription)
+						document.getElementById('createdAnswer').value = JSON.stringify(peer.localDescription)
+						document.getElementById('createdAnswer').hidden = false
+						jsonStringAnswer = JSON.stringify(peer.localDescription)
+						// console.log("Answer:", peer.localDescription)
 						const localDescription = peer.localDescription;
 						const sdp = localDescription.sdp;
 						const type = localDescription.type
-						console.log("Offer with ICE candidates included:", { sdp, type }); //show as object
+						console.log("Answer with ICE candidates included:", { sdp, type }); //show as object
 						btnDownload.disabled = false;
 						break;
 					default:
@@ -726,7 +726,7 @@
 				switch (peer.iceConnectionState) {
 					case "new":
 						break;
-					case "completed":
+					case "connected":
 						break;
 					case "disconnected":
 						break;
@@ -770,15 +770,14 @@
 			channel.onmessage = (event) => alert(event.data)
 		}
 
-		async function acceptAnswer() {
-			console.log('Accepting Answer')
-			const answer = JSON.parse(document.getElementById('remoteAnswer').value)
+		async function createAnswer() {
+			document.getElementById('createdAnswer').value = "Generating answer, please wait..."
+			document.getElementById('createdAnswer').hidden = false
 
-			console.log("Setting remoteDescription with provided answer");
-			await peer.setRemoteDescription(answer);
+			const answer = await peer.createAnswer()
 
-			btnStart.disabled = true;
-			btnStop.disabled = false;
+			await peer.setLocalDescription(answer);//take care about 'await' because can to consider delay on apply candidates
+			console.log("Applied Local Description");
 		}
 
 		/**
@@ -795,41 +794,101 @@
 			channel.send(text)
 		}
 
-		async function startNegotiation() {
-			console.log("Negotiation - Creating offer and setting localDescription")
+		async function mediaAccessReq() {
+			//Ask user to allow permission to camera on browser
+			//Execute: await navigator.mediaDevices.getUserMedia({video: true})
 
-			offer = await peer.createOffer();
+			let devices = (await navigator.mediaDevices.enumerateDevices()).filter(i => i.kind == 'videoinput')
+			//socket.emit('broadcast', {channel: 'log', message: devices })
+			console.log("Available media devices:", devices);
 
-			//offer.sdp = forceKbps(offer.sdp, 50)
-
-			//await sendOfferToServer(offer.sdp);
-			console.log("Offer without ICE candidates:", offer)
-			await peer.setLocalDescription(offer)
+			captureCamera();
 		}
 
-		//start
-		async function start() {
-			console.log('Start Call')
-			document.getElementById('createdOffer').removeAttribute('hidden');
-			document.getElementById('createdOffer').value = "Generating SDP offer, please wait..."
-			createPeer();
-			await startNegotiation();
+		async function captureCamera() {
+			//socket.emit('broadcast', {channel: 'log', message: {msg: 'captureCamera()'} })
+			console.log("Capturing camera device...");
+
+			let constraints = {
+				audio: true,
+				/**
+				 * case multiple cameras you can get deviceId executing `mediaAccessReq();' and set here
+				 */
+
+				/**
+				video: {
+					deviceId: { exact: '18ca329e2c50b1f21edc29cba8cf6eb8f8c85d9214e32f8d78ffaefea816c4ab' }
+				}
+				*/
+
+				video: true
+			};
+
+			await navigator.mediaDevices.getUserMedia(constraints).then(async function (stream) {
+				stream.getTracks().forEach(function (track) {
+					applyContraints(track);
+				});
+
+				mediaStream = stream;
+				var videoElement = document.getElementById('localVideo');
+				videoElement.srcObject = stream;
+
+				videoStreamTrack = stream.getVideoTracks()[0];
+				audioStreamTrack = stream.getAudioTracks()[0];
+
+				console.log("Video and audio captured");
+				btnStart.disabled = false;
+
+			}, function (err) {
+				//socket.emit('broadcast', {channel: 'log', message: {msg: 'Could not acquire media: ' + err} })
+				console.error(`Could not acquire media: ${err}`);
+			});
 		}
 
-		function stop() {
-			console.log('Stop Call')
-			peer.close();
+		function applyContraints(videoTrack) {
+			//socket.emit('broadcast', {channel: 'log', message: {msg: 'applyContraints' } })
+			if (videoTrack) {
+				const videoConstraints = {
+					width: { min: 320, max: 1280 },
+					height: { min: 240, max: 720 },
+					frameRate: { min: 5, max: 25 }
+				};
+				console.log("Applying constrains", videoConstraints);
+
+				videoTrack.applyConstraints(videoConstraints)
+					.then(() => {
+						console.log("Video track constraints applied successfully");
+					})
+					.catch((error) => {
+						console.error("Error applying video track constraints:", error);
+						setTimeout(() => {
+							applyContraints();
+						}, 5000);//5seg
+					});
+
+				// Set content hint to 'motion' or 'detail'
+				videoTrack.contentHint = 'motion';
+			}
+		}
+
+		function hideVideo() {
+			localVideoTag.style.display = "none"
 			btnStart.disabled = false;
 			btnStop.disabled = true;
-			document.getElementById('createdOffer').setAttribute('hidden', true);
-			document.getElementById('remoteAnswer').value = "";
+		}
+
+		function startVideo() {
+			localVideoTag.style.display = "block"
+			btnStart.disabled = true;
+			btnStop.disabled = false;
 		}
 
 		btnIceUpload.addEventListener("click", uploadIceConfig);
-		btnStart.addEventListener("click", start);
-		btnStop.addEventListener("click", stop);
-		btnDownload.addEventListener("click", downloadOffer);
-		btnUpload.addEventListener("click", uploadAnswer);
+		btnMediaAccess.addEventListener("click", mediaAccessReq);
+		btnStart.addEventListener("click", startVideo);
+		btnStop.addEventListener("click", hideVideo);
+		btnDownload.addEventListener("click", downloadAnswer);
+		btnUpload.addEventListener("click", uploadOffer);
 	</script>
 </body>
 
